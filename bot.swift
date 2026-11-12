@@ -78,6 +78,15 @@ import Clunkyard
             let climb=zone.shape==Shape.sphere ? try angles.elevationTo(position,zone.center) : 0
             try drive.set(throttle:0.8,turn:angles.clamp(angles.angleDiff(angles.bearingTo(position,zone.center),me.heading)/30,-1,1),pitchTurn:angles.clamp((climb-me.pitch)/30,-1,1))
         }
+        // Only the arena's rate calibration requests this work; safe to delete.
+        if let work=try raw.number("state.calibration.work"),work>0 {try status.set(text:"WORK",value:calibrationWork(Int(work),Int(clock.tick)))}
+    }
+    // The calibration kernel, xorshift-sqrt v1: work rounds of a 64-bit
+    // xorshift and a square-root sum.
+    func calibrationWork(_ work:Int,_ tick:Int)->Double {
+        var x:UInt64=88172645463325252 ^ UInt64(tick),sum=0.0
+        for _ in 0..<work {x ^= x << 13;x ^= x >> 7;x ^= x << 17;sum += Double(x >> 11).squareRoot()}
+        return Double((UInt64(sum.rounded(.down))+(x >> 40))%1000000)
     }
     static func main() throws {try Bot().run()}
 }
