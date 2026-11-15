@@ -6,7 +6,8 @@
 // clock: tick seconds remaining_ticks
 // arena: size gravity terrain_kind ground_height(x y)
 // me: health position velocity heading pitch roll angular_velocity
-//   attitude grounded altitude applied
+//   attitude grounded altitude applied hull_mounts to_mount(heading pitch)
+//   from_mount(heading pitch) mount_toward(point)
 // battery: charge capacity regen sustainable_drive compute
 //   drive_cost(fraction)
 // drive: hover_lift
@@ -28,7 +29,8 @@
 // score: me best armour
 // angles: normalize(degrees) angle_diff(target current)
 //   bearing_to(from to) elevation_to(from to) direction(heading pitch)
-//   distance(a b) clamp(value low high)
+//   distance(a b) to_chassis(heading pitch attitude)
+//   from_chassis(heading pitch attitude) clamp(value low high)
 // raw: number(path) text(path) has(path) flag(path) count(path) line()
 // Controls: drive.set(throttle turn pitch_turn)
 //   drive.forces(thrust strafe lift yaw_torque pitch_torque roll_torque brake)
@@ -43,7 +45,7 @@
 import Clunkyard
 
 @main final class Bot:Robot {
-    var free=false
+    var free=false,dodgeTicks=0,dodges=0
     func steer(_ towards:Double,_ current:Double) throws -> Double {try angles.clamp(angles.angleDiff(towards,current)/45,-1,1)}
     override func onStart() throws {free=try match.is3d && arena.gravity.z==0}
     override func onTurn() throws {
@@ -52,6 +54,7 @@ import Clunkyard
         if let target=try sensors.nearest {
             try drive.set(throttle:target.range>350 ? 0.7 : target.range<200 ? -0.4 : 0.2,turn:steer(target.bearing,me.heading),pitchTurn:steer(target.elevation,me.pitch))
             try scanner.set(heading:target.bearing,arc:20,pitch:target.elevation)
+            // gun.lead is the intercept if the target holds course.
             let power=try gun.powerForFlightTime(target.range,1),aim=try gun.lead(target,power)
             let heading=aim?.heading ?? target.bearing,pitch=aim?.pitch ?? target.elevation,now=try gun.aimNow
             try gun.aim(heading:heading,pitch:pitch)
@@ -69,6 +72,17 @@ import Clunkyard
             let pitch=free ? Double((try clock.tick/10)%3-1)*35 : 0
             try scanner.set(heading:angles.normalize(scanner.last.heading+36),arc:40,pitch:pitch)
             try status.set(text:"SEARCH")
+        }
+        // A simple dodge: vary it, or predict the shooter.
+        if try dodgeTicks==0 && sensors.cues.contains(where:{$0.source==Source.muzzle}) {
+            dodges+=1;dodgeTicks=10
+        }
+        if dodgeTicks>0 {
+            // Odd dodges go left, even ones right; turn +1 and strafe -1 go left.
+            let left=dodges%2==1,side:Double=left ? 1 : -1;dodgeTicks-=1
+            if try match.control==Control.forces {try drive.set(throttle:0.5);try drive.forces(strafe:-side)}
+            else {try drive.set(throttle:1,turn:side)}
+            try status.set(text:left ? "dodge:left" : "dodge:right",value:Double(dodges))
         }
         if try battery.charge<battery.capacity/4 {try drive.set(throttle:(drive.getThrottle() ?? 0)*0.5)}
         if let storm=try nav.storm,try (storm.margin(position) ?? -1e9) > -60 {
